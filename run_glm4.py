@@ -351,12 +351,13 @@ class Transformer(torch.nn.Module):
         super(Transformer, self).__init__()
         self.num_layers = config.num_layers
         self.post_layer_norm = config.post_layer_norm
+        self.dtype = torch.bfloat16 if config.torch_dtype == "bfloat16" else torch.float32
         self.layers = nn.ModuleList([Layer(config, device) for _ in range(self.num_layers)])
         if self.post_layer_norm:
             self.output_layernorm = RMSNorm(config.hidden_size, 
                                             eps=config.layernorm_epsilon, 
                                             device=device, 
-                                            dtype=config.torch_dtype)
+                                            dtype=self.dtype)
 
     def _get_layer(self, layer_id):
         return self.layers[layer_id]
@@ -608,7 +609,10 @@ def convert_ckpt():
     model_dict = huggingface_model.state_dict()
     new_model_dict = {}
     for k, v in model_dict.items():
-        pass
+        new_model_dict[k.replace("encoder", "model")
+                       .replace("final_layernorm", "output_layernorm")
+                       .replace("post_attention_layernorm", "output_layernorm")
+                       .replace("embedding.word_embeddings", "word_embedding")] = v
     torch.save(new_model_dict, "glm4.pt")
 
 
