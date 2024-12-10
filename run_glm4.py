@@ -161,13 +161,12 @@ class Attention(torch.nn.Module):
         attention_probs = attention_probs.view(output_size[0] * output_size[1], output_size[2], -1)
         context_layer = torch.bmm(attention_probs, value_layer)
         context_layer = context_layer.view(*output_size)
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+        context_layer = context_layer.transpose(1, 2).contiguous()
         new_size = context_layer.size()[:-2] + (self.hidden_size_per_partition,)
         context_layer = context_layer.reshape(*new_size)
 
         # context_layer [batch, sequence_length, hidden_size]
         return context_layer
-
 
 # TODO: Implement the AttentionBlock class.
 # Done
@@ -227,7 +226,9 @@ class AttentionBlock(torch.nn.Module):
                 + (self.num_multi_query_groups_per_partition, self.hidden_size_per_attention_head)
             )
         else:
-            new_shape = mixed_x_layer.size()[:-1] + (self.num_attention_heads_per_partition, self.hidden_size_per_attention_head * 3)
+            new_shape = mixed_x_layer.size()[:-1] + \
+                (self.num_attention_heads_per_partition,
+                 self.hidden_size_per_attention_head * 3)
 
             query_layer, key_layer, value_layer = mixed_x_layer.view(*new_shape).chunk(3, dim=-1)
 
@@ -244,7 +245,7 @@ class AttentionBlock(torch.nn.Module):
             value_layer = torch.cat([kv_cache[1], value_layer], dim=2)
         if use_cache:
             if kv_cache is None:
-                kv_cache = torch.cat((key_layer.unsqueeze(0).unsqueeze(0), value_layer.unsqueeze(0).unsqueeze(0)), dim=1)
+                new_kv_cache = torch.cat((key_layer.unsqueeze(0).unsqueeze(0), value_layer.unsqueeze(0).unsqueeze(0)), dim=1)
             else:
                 new_kv_cache = (key_layer, value_layer)
         else:
@@ -336,7 +337,7 @@ class Layer(torch.nn.Module):
             layernorm_output, attention_mask, rotary_pos_emb, kv_cache=kv_cache, use_cache=use_cache
         )
         layernorm_input = hidden_states + self_attn_output
-        layernorm_output = self.output_layernorm(layernorm_output)
+        layernorm_output = self.output_layernorm(layernorm_input)
 
         mlp_output = self.mlp(layernorm_output)
         output = layernorm_input + mlp_output
@@ -599,7 +600,7 @@ class ChatGLMForConditionalGeneration(PreTrainedModel):
 
 def convert_ckpt():
     huggingface_model = AutoModelForCausalLM.from_pretrained(
-        "THUDM/glm-4-9b-chat",
+        "../models--THUDM--glm-4-9b-chat/snapshots/1ff770585cbf3c1ece419f34f8161c88c7e9a224",
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
         trust_remote_code=True,
@@ -617,8 +618,8 @@ def convert_ckpt():
 
 
 if __name__ == "__main__":
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 设置 GPU 编号，如果单机单卡指定一个，单机多卡指定多个 GPU 编号
-    MODEL_PATH = "THUDM/glm-4-9b-chat"
+    os.environ['CUDA_VISIBLE_DEVICES'] = '4'  # 设置 GPU 编号，如果单机单卡指定一个，单机多卡指定多个 GPU 编号
+    MODEL_PATH = "../models--THUDM--glm-4-9b-chat/snapshots/1ff770585cbf3c1ece419f34f8161c88c7e9a224"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -636,10 +637,8 @@ if __name__ == "__main__":
     inputs = inputs.to(device)
     model = ChatGLMForConditionalGeneration(config=Config(), device=device).eval()
 
-    convert_ckpt()
-
+    # convert_ckpt()
     model.load_state_dict(torch.load("glm4.pt"))
-
     generation_config = GenerationConfig(
         eos_token_id=[151329,151336,151338],
         pad_token_id= 151329,
