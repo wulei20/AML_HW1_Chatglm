@@ -10,6 +10,7 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers import PretrainedConfig, GenerationConfig
 from threading import Thread
+import argparse
 from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
 
 
@@ -655,6 +656,10 @@ if __name__ == "__main__":
     history = []
     stop = StopOnTokens()
 
+    parser = argparse.ArgumentParser(description="GLM-4")
+    parser.add_argument("-d", "--detailed", action="store_true")
+    args = parser.parse_args()
+
     print("Welcome to the GLM-4-9B CLI chat. Type your messages below.")
     while True:
         user_input = input("You: ")
@@ -678,32 +683,52 @@ if __name__ == "__main__":
             return_dict=True,
             return_tensors="pt"
         ).to(model.device)
-        streamer = TextIteratorStreamer(
-            tokenizer=tokenizer,
-            timeout=60,
-            skip_prompt=True,
-            skip_special_tokens=True
-        )
-        generate_kwargs = {
-            "input_ids": model_inputs["input_ids"],
-            "attention_mask": model_inputs["attention_mask"],
-            "input_ids": model_inputs["input_ids"],
-            "attention_mask": model_inputs["attention_mask"],
-            "streamer": streamer,
-            "stopping_criteria": StoppingCriteriaList([stop]),
-            "repetition_penalty": 1.2,
-        }
-        t = Thread(target=model.generate, kwargs=generate_kwargs)
-        start_time = time.time()
-        t.start()
-        print("GLM-4:", end="", flush=True)
-        delete_first_newline = False
-        for new_token in streamer:
-            if not delete_first_newline:
-                delete_first_newline = True
-                continue
-            if new_token:
-                print(new_token, end="", flush=True)
-                history[-1][1] += new_token
-        print("\nAnswer generated in %f s" % (time.time() - start_time))
+
+        if not args.detailed:
+            streamer = TextIteratorStreamer(
+                tokenizer=tokenizer,
+                timeout=60,
+                skip_prompt=True,
+                skip_special_tokens=True
+            )
+            generate_kwargs = {
+                "input_ids": model_inputs["input_ids"],
+                "attention_mask": model_inputs["attention_mask"],
+                "input_ids": model_inputs["input_ids"],
+                "attention_mask": model_inputs["attention_mask"],
+                "streamer": streamer,
+                "stopping_criteria": StoppingCriteriaList([stop]),
+                "repetition_penalty": 1.2,
+            }
+            t = Thread(target=model.generate, kwargs=generate_kwargs)
+            t.start()
+            print("GLM-4:", end="", flush=True)
+            delete_first_newline = False
+            for new_token in streamer:
+                if not delete_first_newline:
+                    delete_first_newline = True
+                    continue
+                if new_token:
+                    print(new_token, end="", flush=True)
+                    history[-1][1] += new_token
+            print()
+        else:
+            generation_config = GenerationConfig(
+            eos_token_id=[151329,151336,151338],
+            pad_token_id= 151329,
+            do_sample= True,
+            temperature= 0.8,
+            max_length= 100,
+            top_p= 0.8,
+            top_k= 1,
+            transformers_version= "4.44.0")
+
+            with torch.no_grad():
+                start_time = time.time()
+                outputs = model.generate(**model_inputs, generation_config=generation_config)
+                outputs = outputs[:, model_inputs['input_ids'].shape[1]:]
+                print("GLM-4:", tokenizer.decode(outputs[0], skip_special_tokens=True)[1:])
+                print("Answer vector length: %d" % outputs.shape[1])
+                print("Answer generated in %f s" % (time.time() - start_time))
+
         history[-1][1] = history[-1][1].strip()
