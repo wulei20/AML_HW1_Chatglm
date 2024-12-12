@@ -822,7 +822,7 @@ if __name__ == "__main__":
             pad_token_id= 151329,
             do_sample= True,
             temperature= 0.8,
-            max_length= 100,
+            max_new_tokens= 8192,
             top_p= 0.8,
             top_k= 1,
             transformers_version= "4.44.0")
